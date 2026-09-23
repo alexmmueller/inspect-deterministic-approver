@@ -180,6 +180,7 @@ def _check_rules(text: str, rules: list[DenyRule]) -> DenyRule | None:
 def deterministic_rule_approver(
     rules: list[DenyRule] | None = None,
     single_shot_tools: tuple[str, ...] = ("bash", "python", "shell"),
+    escalate_when_unmatched: bool = False,
 ) -> Approver:
     """Deterministic, regex-based approver with bash_session reassembly.
 
@@ -188,6 +189,14 @@ def deterministic_rule_approver(
             Defaults to DEFAULT_RULES.
         single_shot_tools: Tool names (besides bash_session) whose full
             argument text is checked directly, with no reassembly.
+        escalate_when_unmatched: If True, return decision "escalate"
+            instead of "approve" when no rule matches -- for composing
+            with a downstream (typically LLM-judge) approver via
+            ApprovalPolicy chaining, so semantic/drift cases with no
+            attack-shaped signature get a real judgment call instead of
+            a silent default-approve. If False (default), unmatched
+            calls are approved directly -- appropriate when this approver
+            runs standalone or as the sole gate for its tools.
     """
     active_rules = rules if rules is not None else DEFAULT_RULES
 
@@ -202,9 +211,20 @@ def deterministic_rule_approver(
         elif call.function in single_shot_tools:
             command_text = " ".join(str(v) for v in call.arguments.values())
         else:
-            # not a tool this approver has rules for -- approve by default;
-            # this approver is meant to compose with other approvers/policies
-            # for tools outside its scope, not to be the sole gate.
+            # not a tool this approver has explicit rules for. When
+            # escalate_when_unmatched is set, hand off to the next policy
+            # (typically an LLM judge) rather than silently approving --
+            # a regex denylist has no coverage for tools/args it was never
+            # given rules for, and that's a real gap, not a safe default.
+            if escalate_when_unmatched:
+                return Approval(
+                    decision="escalate",
+                    explanation=(
+                        f"No deterministic rules configured for tool "
+                        f"'{call.function}' -- escalating for a semantic "
+                        f"judgment check."
+                    ),
+                )
             return Approval(decision="approve")
 
         matched = _check_rules(command_text, active_rules)
@@ -215,6 +235,15 @@ def deterministic_rule_approver(
                     f"Deterministic rule '{matched.name}' matched on the "
                     f"reassembled command: {matched.explanation} "
                     f"(reassembled text: {command_text!r})"
+                ),
+            )
+        if escalate_when_unmatched:
+            return Approval(
+                decision="escalate",
+                explanation=(
+                    "No deterministic rule matched -- escalating for a "
+                    "semantic/judgment check (this approver has no rule "
+                    "for off-topic drift with no attack-shaped signature)."
                 ),
             )
         return Approval(decision="approve")
