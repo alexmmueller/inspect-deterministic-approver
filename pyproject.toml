@@ -1,0 +1,18 @@
+[project]
+name = "inspect-deterministic-approver"
+version = "0.1.0"
+description = "Deterministic rule-based tool-call approver for Inspect AI, with bash_session command reassembly to close the fragmentation-bypass gap (see UKGovernmentBEIS/inspect_ai#5133)."
+requires-python = ">=3.10"
+dependencies = [
+    "inspect-ai",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-asyncio"]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
