@@ -57,6 +57,29 @@ my_rules = [DenyRule("no-rm-rf", re.compile(r"rm\s+-rf\s+/"), "Recursive delete 
 approver = deterministic_rule_approver(rules=my_rules)
 ```
 
+## Hybrid mode: escalating to an LLM judge for semantic drift
+
+The regex-only approver above catches attack-shaped patterns for free,
+but has no way to flag off-task actions with no attack signature at all
+(e.g. an agent making an unrelated web search mid-task). `llm_judge_approver`
+and `hybrid.py` add a second layer that only gets called when the
+deterministic layer finds nothing:
+
+```python
+from inspect_deterministic_approver import hybrid_approval_policies
+
+# deterministic rules run first and are free; only escalates to a live
+# LLM judge call when no rule matches
+policies = hybrid_approval_policies(tools="*", judge_model="ollama/qwen2.5:14b-instruct")
+```
+
+This composes via Inspect AI's own `ApprovalPolicy` `"escalate"` decision
+-- not a bespoke wrapper. Measured result (see
+[`ai-safety-training-exercises/monitor-comparison`](https://github.com/alexmmueller/ai-safety-training-exercises/tree/main/monitor-comparison)
+in the companion repo): the hybrid chain matches a standalone LLM judge's
+100% catch rate on a 12-trajectory test set while cutting judge calls by
+42% (7/12 vs 12/12).
+
 ## Measured results
 
 **Test suite: 17/17 passing** (`tests/test_approver.py`), covering:
@@ -74,6 +97,13 @@ approver = deterministic_rule_approver(rules=my_rules)
 approver through Inspect AI's *actual* approval machinery
 (`inspect_ai.approval._apply.apply_tool_approval`), not hand-rolled test
 scaffolding -- confirms it behaves correctly inside the real pipeline.
+
+**Hybrid escalation integration test** (`tests/hybrid_integration_test.py`):
+end-to-end proof of the deterministic-then-judge chain through real
+Inspect AI approval machinery -- an obvious attack is caught by the
+deterministic layer alone (judge never called), semantic drift escalates
+to the judge and is caught, and a clearly on-task action escalates and is
+approved by the judge.
 
 ## Honest limitations
 
